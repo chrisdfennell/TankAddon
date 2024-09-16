@@ -1,5 +1,5 @@
 local title = ...
-local version = GetAddOnMetadata(title, "Version")
+local version = C_AddOns.GetAddOnMetadata(title, "Version")
 
 -- sbd:set_debug()
 
@@ -155,10 +155,13 @@ end)
 function addon:CreateFrames()
     sbd:log_debug("CreateFrames")
     
+    screenWidth = GetScreenWidth() * UIParent:GetEffectiveScale()
+    screenHeight = GetScreenHeight() * UIParent:GetEffectiveScale()
+    
     local maxWidth = (db.unit_width * db.unit_columns) + (db.unit_padding * (db.unit_columns - 1))
     
     if self.GroupFrame then
-        self.GroupFrame.destroy()
+        self.GroupFrame:Hide() -- Better to hide than destroy
         self.GroupFrame = nil
     end
 
@@ -189,42 +192,17 @@ function addon:CreateFrames()
         end
     end)
 
+    -- Define GetUnitFrame method for GroupFrame here
     function self.GroupFrame:GetUnitFrame(name)
         for _, child in ipairs({self:GetChildren()}) do
             if child:GetName() == name then
                 return child
             end
         end
-
         return nil
     end
 
-    function self.GroupFrame:GetUnitFrameForUnit(unit)
-        for _, child in ipairs({self:GetChildren()}) do
-            if child.unit == unit then
-                return child
-            end
-        end
-
-        return nil
-    end
-
-    function self.GroupFrame:UpdateThreatForUnit(unit, threatPct)
-        local child = self:GetUnitFrameForUnit(unit)
-        
-        if child then
-            child:SetThreatPercent(threatPct)
-        else
-            sbd:log_debug("UpdateThreatForUnit nil child for unit:", unit, ", threatPct:", threatPct)
-        end
-    end
-
-    function self.GroupFrame:ResetUnitFramesThreat()
-        for _, child in ipairs({self:GetChildren()}) do
-            child:SetThreatPercent(0)
-        end
-    end
-
+    -- Define ResetUnitFrames inside CreateFrames and attach it to GroupFrame
     function self.GroupFrame:ResetUnitFrames()
         for _, child in ipairs({self:GetChildren()}) do
             child.unit = nil
@@ -246,14 +224,14 @@ function addon:CreateFrames()
         button:SetWidth(db.unit_width)
         button:SetHeight(db.unit_height)
         button:SetBackdrop({ bgFile = "Interface/Tooltips/UI-Tooltip-Background" })
-        button:SetPoint("BOTTOMLEFT", parent, currentUnitOffsetX, currentUnitOffsetY)
+        button:SetPoint("BOTTOMLEFT", self.GroupFrame, currentUnitOffsetX, currentUnitOffsetY)
 
         button.unit = nil
 
-        button.texture = button:CreateTexture(nil, "PARENT")
-        button.texture:SetColorTexture(1, 1, 1, 1)
+        -- Using solid color texture
+        button.texture = button:CreateTexture(nil, "ARTWORK")
+        button.texture:SetColorTexture(1, 0, 0, 1)  -- Solid red
         button.texture:SetAllPoints(button)
-        button.texture:SetGradientAlpha("VERTICAL", 1, 0, 0, 0, 0, 0, 0, 0)
 
         button.text = button:CreateFontString(nil, "ARTWORK")
         button.text:SetFont(data.Font, db.font_size)
@@ -263,7 +241,7 @@ function addon:CreateFrames()
             button.text:SetText(tostring(i))
         end
 
-        button.badge = button:CreateTexture(nil, "PARENT")
+        button.badge = button:CreateTexture(nil, "ARTWORK")
         button.badge:SetSize(20, 20)
         button.badge:SetTexture(2202478)
         button.badge:SetPoint("TOPLEFT", -5, 5)
@@ -271,7 +249,8 @@ function addon:CreateFrames()
         button:Hide()
 
         function button:SetThreatPercent(alpha)
-            button.texture:SetGradientAlpha("VERTICAL", 1, 0, 0, alpha, alpha, 0, 0, 0)
+            -- Set alpha for transparency
+            button.texture:SetAlpha(alpha)
         end
 
         function button:SetRole(role)
@@ -558,8 +537,7 @@ function addon:ADDON_LOADED(addOnName)
             end
         end
 
-        sbd:log_debug("saved variables:")
-        sbd:log_debug_table(db)
+        self:CreateFrames()  -- Ensure GroupFrame is created early here
 
         screenWidth = GetScreenWidth() * UIParent:GetEffectiveScale()
         sbd:log_debug("screenWidth: ", screenWidth)
@@ -570,10 +548,9 @@ function addon:ADDON_LOADED(addOnName)
         sbd:GenerateOptionsInterface(self, data.Options, db, function()
             self:OnOptionsUpdated()
         end)
-
-        self:CreateFrames()
     end
 end
+
 
 function addon:PLAYER_LOGOUT()
     TankAddonVars = db

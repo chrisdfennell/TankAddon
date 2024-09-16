@@ -66,45 +66,48 @@ function sbd:GenerateOptionsInterface(addon, options, db, onUpdated)
     local addonTitle = addon:GetName()
     local optionsPanelTitle = addonTitle .. "Options"
 
-    self:log_debug("GenerateOptionsInterface: ", optionsPanelTitle)
+    -- Create a real frame
+    local panel = CreateFrame("Frame", optionsPanelTitle, UIParent)
+    panel.name = addonTitle
 
-    local optionsPanel = CreateFrame("Frame", optionsPanelTitle)
-    optionsPanel.name = addonTitle
+    -- Create title
+    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 10, -10)
+    title:SetText(addonTitle .. " v" .. addon.version)
 
-    local title = optionsPanel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-	title:SetPoint("TOPLEFT", 10, -10)
-	title:SetText(addonTitle .. " v" .. addon.version)
+    -- Register the panel with the new settings API
+    local category = Settings.RegisterCanvasLayoutCategory(panel, addonTitle)
+    Settings.RegisterAddOnCategory(category)
 
-    InterfaceOptions_AddCategory(optionsPanel)
-
+    -- Helper functions for creating widgets
     function NewCheckbox(name, label, hpos, vpos, value)
-        local checkbox = CreateFrame("CheckButton", name, optionsPanel, "ChatConfigCheckButtonTemplate");
+        local checkbox = CreateFrame("CheckButton", name, panel, "ChatConfigCheckButtonTemplate")
         checkbox:SetPoint("TOPLEFT", hpos, vpos)
         checkbox:SetChecked(value)
-        checkbox.tooltip = label;
-        getglobal(checkbox:GetName().."Text"):SetText(label);
+        checkbox.tooltip = label
+        getglobal(checkbox:GetName() .. "Text"):SetText(label)
         return checkbox
     end
 
     function NewSlider(name, label, hpos, vpos, value, min, max, step)
-        local slider = CreateFrame("Slider", name, optionsPanel, "OptionsSliderTemplate");
-        slider:SetPoint("TOPLEFT", hpos, vpos);
-        slider.tooltip = label;
-        getglobal(slider:GetName().."Text"):SetText(label);
-        getglobal(slider:GetName().."Low"):SetText(tostring(min));
-        getglobal(slider:GetName().."High"):SetText(tostring(max));
-        slider:SetMinMaxValues(min, max);
-        slider:SetValueStep(step);
-        slider:SetValue(value);
+        local slider = CreateFrame("Slider", name, panel, "OptionsSliderTemplate")
+        slider:SetPoint("TOPLEFT", hpos, vpos)
+        slider.tooltip = label
+        getglobal(slider:GetName() .. "Text"):SetText(label)
+        getglobal(slider:GetName() .. "Low"):SetText(tostring(min))
+        getglobal(slider:GetName() .. "High"):SetText(tostring(max))
+        slider:SetMinMaxValues(min, max)
+        slider:SetValueStep(step)
+        slider:SetValue(value)
         return slider
     end
 
     function NewSelect(name, label, hpos, vpos, value, values, on_clicked)
-        local select = CreateFrame("Frame", name, optionsPanel, "UIDropDownMenuTemplate")
+        local select = CreateFrame("Frame", name, panel, "UIDropDownMenuTemplate")
         select:SetPoint("TOPLEFT", hpos - 15, vpos)
         UIDropDownMenu_SetWidth(select, 140)
         select.list = values
-        select.tooltip = label;
+        select.tooltip = label
 
         function initialize(self)
             local info = UIDropDownMenu_CreateInfo()
@@ -116,28 +119,29 @@ function sbd:GenerateOptionsInterface(addon, options, db, onUpdated)
                     value = arg1
                     on_clicked(arg1)
                     UIDropDownMenu_SetSelectedValue(select, self.value, true)
-                    UIDropDownMenu_SetText(select, label..": "..value)
+                    UIDropDownMenu_SetText(select, label .. ": " .. value)
                 end
 
                 UIDropDownMenu_AddButton(info)
             end
 
             UIDropDownMenu_SetSelectedValue(select, value)
-            UIDropDownMenu_SetText(select, label..": "..value)
+            UIDropDownMenu_SetText(select, label .. ": " .. value)
         end
 
         UIDropDownMenu_Initialize(select, initialize)
     end
 
+    -- Creating the controls
     local controls = {}
     local lvpos, rvpos = -35, -50
 
     for k, v in pairs(options) do
-        self:log_debug(v.label, ": ", v.default)
+        sbd:log_debug(v.label, ": ", v.default)
 
         if v.type == "boolean" then
-            local checkbox = NewCheckbox(k.."_checkbox", v.label, 10, lvpos, db[k])
-            
+            local checkbox = NewCheckbox(k .. "_checkbox", v.label, 10, lvpos, db[k])
+
             checkbox:SetScript("OnClick", function(self, button, down)
                 local state = self:GetChecked()
                 db[k] = state
@@ -147,28 +151,26 @@ function sbd:GenerateOptionsInterface(addon, options, db, onUpdated)
             function checkbox:UpdateValue(value)
                 self:SetChecked(value)
             end
-            
-            controls[k] = checkbox
 
+            controls[k] = checkbox
             lvpos = lvpos - 30
         elseif v.type == "number" then
-            local slider = NewSlider(k.."_slider", v.label, 200, rvpos, db[k], v.min, v.max, v.step)
+            local slider = NewSlider(k .. "_slider", v.label, 200, rvpos, db[k], v.min, v.max, v.step)
 
             slider:SetScript("OnValueChanged", function(self, value, userInput)
                 local val = math.floor(value)
                 db[k] = val - (val % v.step)
                 onUpdated()
-            end);
+            end)
 
             function slider:UpdateValue(value)
                 self:SetValue(value)
             end
 
             controls[k] = slider
-
             rvpos = rvpos - 45
         elseif v.type == "select" then
-            NewSelect(k.."_select", v.label, 10, lvpos, db[k], v.values, function(value)
+            NewSelect(k .. "_select", v.label, 10, lvpos, db[k], v.values, function(value)
                 db[k] = value
                 onUpdated()
             end)
@@ -177,20 +179,19 @@ function sbd:GenerateOptionsInterface(addon, options, db, onUpdated)
         end
     end
 
-    optionsPanel.okay = function()
+    -- Setup the panel callbacks
+    panel.okay = function()
         onUpdated()
     end
-    
-    optionsPanel.default = function()
+
+    panel.default = function()
         addon:ResetToDefaults()
         onUpdated()
     end
-    
-    optionsPanel.refresh = function()
+
+    panel.refresh = function()
         for k, v in pairs(controls) do
             v:UpdateValue(db[k])
         end
     end
-
-    return optionsPanel
 end
