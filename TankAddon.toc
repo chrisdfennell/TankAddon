@@ -1,0 +1,10 @@
+## Interface: 110002
+## Title: TankAddon
+## Notes: Taunt target of high threat party/raid members.
+## Author: sbd74; Fennell
+## Version: 1.8
+## SavedVariablesPerCharacter: TankAddonVars
+
+data.lua
+sbd.lua
+addon.lua
