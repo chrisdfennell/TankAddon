@@ -206,12 +206,18 @@ function addon:CreateFrames()
     function self.GroupFrame:ResetUnitFrames()
         for _, child in ipairs({self:GetChildren()}) do
             child.unit = nil
-
-            if not DEBUG then
-                child.text:SetText(nil)
-            end
-
+            child.text:SetText(nil)
+            child.texture:SetColorTexture(0, 0, 0, 1) -- Reset background color
             child:Hide()
+        end
+    end
+
+    -- Define ResetUnitFramesThreat inside CreateFrames and attach it to GroupFrame
+    function self.GroupFrame:ResetUnitFramesThreat()
+        for _, child in ipairs({self:GetChildren()}) do
+            if child.texture then
+                child.texture:SetColorTexture(0, 0, 0, 1)  -- Reset to black (no aggro)
+            end
         end
     end
 
@@ -230,7 +236,7 @@ function addon:CreateFrames()
 
         -- Using solid color texture
         button.texture = button:CreateTexture(nil, "ARTWORK")
-        button.texture:SetColorTexture(1, 0, 0, 1)  -- Solid red
+        button.texture:SetColorTexture(1, 0, 0, 1)  -- Solid red (default for aggro)
         button.texture:SetAllPoints(button)
 
         button.text = button:CreateFontString(nil, "ARTWORK")
@@ -249,7 +255,8 @@ function addon:CreateFrames()
         button:Hide()
 
         function button:SetThreatPercent(alpha)
-            -- Set alpha for transparency
+            -- Ensure alpha is between 0.0 and 1.0
+            alpha = math.min(1, math.max(0, alpha))
             button.texture:SetAlpha(alpha)
         end
 
@@ -345,60 +352,29 @@ end
 function addon:UpdateGroupGuidList()
     sbd:log_debug("UpdateGroupGuidList")
 
+    -- Clear the current group list
     wipe(groupGuidList)
 
-    if not inRaid then
-        groupGuidList["player"] = {
-            guid = UnitGUID("player"),
-            name = UnitName("player"),
-            target = "target"
-        }
-    end
-
-    if inRaid then
+    -- Check if the player is in a raid
+    if IsInRaid() then
         for i = 1, GetNumGroupMembers() do
-            local unit = format("raid%d", i)
-            local target = format("raid%dtarget", i)
-
+            local unit = "raid" .. i
             if UnitExists(unit) then
-                groupGuidList[unit] = {
-                    guid = UnitGUID(unit),
-                    name = UnitName(unit),
-                    target = target
-                }
+                groupGuidList[unit] = { name = UnitName(unit), target = unit .. "target" }
             end
         end
-    elseif inParty then
+    -- Check if the player is in a party
+    elseif IsInGroup() then
         for i = 1, GetNumSubgroupMembers() do
-            local unit = format("party%d", i)
-            local target = format("party%dtarget", i)
-
+            local unit = "party" .. i
             if UnitExists(unit) then
-                groupGuidList[unit] = {
-                    guid = UnitGUID(unit),
-                    name = UnitName(unit),
-                    target = target
-                }
+                groupGuidList[unit] = { name = UnitName(unit), target = unit .. "target" }
             end
-        end
-    elseif DEBUG then
-        local count = debugUnitCount > 0 and debugUnitCount or maxUnitFrames
-
-        if groupGuidList["player"] then
-            count = count - 1 -- minus one here to account for added player unit frame
-        end
-
-        for i = 1, count do
-            local unit = "player"
-            local target = "target"
-
-            groupGuidList[unit .. i] = {
-                guid = UnitGUID("player"),
-                name = data.RandomNames[i],
-                target = target
-            }
         end
     end
+
+    -- Always add the player to the group list
+    groupGuidList["player"] = { name = UnitName("player"), target = "target" }
 end
 
 function addon:UpdateGroupFrameUnits()
@@ -498,30 +474,54 @@ end
 function addon:UpdateUnitFramesThreat()
     sbd:log_debug("UpdateUnitFramesThreat")
 
-    if not inRaid then
-        local playerIsTanking, playerThreatStatus, playerThreatPct, playerRawThreatPct, playerThreatValue =
-            UnitDetailedThreatSituation("player", "target")
+    -- Update threat for the player
+    if UnitExists("target") then
+        local playerIsTanking, playerThreatStatus, playerThreatPct = UnitDetailedThreatSituation("player", "target")
+        local playerFrame = self.GroupFrame:GetUnitFrame("UnitFrame1")
+        
+        if playerFrame and playerThreatPct then
+            -- Update threat percentage and background color based on aggro
+            playerFrame:SetThreatPercent(playerThreatPct / threatPercentDivisor)
 
-        if playerThreatPct then
-            self.GroupFrame:UpdateThreatForUnit("player", (playerThreatPct / threatPercentDivisor))
+            if playerIsTanking then
+                playerFrame.texture:SetColorTexture(1, 0, 0, 1) -- Red for aggro
+                sbd:log_info("Player has aggro")
+            else
+                playerFrame.texture:SetColorTexture(0, 0, 0, 1) -- Black if no aggro
+                sbd:log_info("Player does NOT have aggro")
+            end
         end
+    else
+        sbd:log_debug("Player has no valid target.")
     end
 
-    local groupGuidList = groupGuidList
-
+    -- Update threat for other group members
     if groupGuidList then
+        local unitIndex = 2
         for unit, data in pairs(groupGuidList) do
-            if UnitExists(unit) then
-                local isTanking, threatStatus, threatPct, rawThreatPct, threatValue =
-                    UnitDetailedThreatSituation(unit, data["target"])
+            if unit ~= "player" and UnitExists(unit) then
+                local isTanking, threatStatus, threatPct = UnitDetailedThreatSituation(unit, data.target or "target")
+                local unitFrame = self.GroupFrame:GetUnitFrame(format("UnitFrame%d", unitIndex))
 
-                if threatPct then
-                    self.GroupFrame:UpdateThreatForUnit(unit, (threatPct / threatPercentDivisor))
+                if unitFrame and threatPct then
+                    -- Update threat percentage and background color based on aggro
+                    unitFrame:SetThreatPercent(threatPct / threatPercentDivisor)
+
+                    if isTanking then
+                        unitFrame.texture:SetColorTexture(1, 0, 0, 1) -- Red for aggro
+                        sbd:log_info(UnitName(unit) .. " has aggro")
+                    else
+                        unitFrame.texture:SetColorTexture(0, 0, 0, 1) -- Black if no aggro
+                        sbd:log_info(UnitName(unit) .. " does NOT have aggro")
+                    end
                 end
+                unitIndex = unitIndex + 1
             end
         end
     end
 end
+
+
 
 -- event functions:
 function addon:ADDON_LOADED(addOnName)
