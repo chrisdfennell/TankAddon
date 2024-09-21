@@ -17,6 +17,8 @@ local tauntSpellId, tauntSpellName
 local inParty, inRaid
 local maxUnitFrames = 40
 local groupGuidList = {}
+local lastAggroMessages = {}
+
 
 -- addon:
 local addon = CreateFrame("Frame", title, UIParent) -- instead of UIParent, try using the health bar under character
@@ -377,6 +379,16 @@ function addon:UpdateGroupGuidList()
     groupGuidList["player"] = { name = UnitName("player"), target = "target" }
 end
 
+-- Utility function to truncate the name
+local function TruncateName(name, maxLength)
+    if string.len(name) > maxLength then
+        return string.sub(name, 1, maxLength) .. "..."
+    else
+        return name
+    end
+end
+
+
 function addon:UpdateGroupFrameUnits()
     sbd:log_debug("UpdateGroupFrameUnits")
 
@@ -394,71 +406,74 @@ function addon:UpdateGroupFrameUnits()
         self.GroupFrame:SetHeight(groupFrameHeight)
         self.GroupFrame:ResetUnitFrames()
 
-        -- set local player to first unit frame:
+        -- Set local player to first unit frame
         local unitFrame = self.GroupFrame:GetUnitFrame("UnitFrame1")
         unitFrame:SetBackdropColor(0, 0, 0, 1)
         unitFrame.unit = "player"
         unitFrame:SetRole(UnitGroupRolesAssigned("player"))
-        unitFrame.text:SetText(UnitName("player"))
+        
+        -- Truncate the player's name
+        unitFrame.text:SetText(TruncateName(UnitName("player"), 8))  -- Truncate to 8 characters, for example
         unitFrame:Show()
 
         local unitFrameIndex = 2 -- starting with 2 since local player takes 1
 
+        -- Loop through group members and assign actions based on role
         for unit, data in pairs(groupGuidList) do
             if unit ~= "player" then
                 local unitName = data["name"]
                 unitFrame = self.GroupFrame:GetUnitFrame(format("UnitFrame%d", unitFrameIndex))
-    
+
                 if unitFrame then
                     unitFrame:SetBackdropColor(0, 0, 0, 1)
-    
                     if unitName ~= UnitName("player") then
+                        -- Determine action based on player role
                         if playerRole == "TANK" and tauntSpellName then
+                            -- Tank: Cast taunt on the unit's target
                             unitFrame:SetAttribute("type", "spell")
                             unitFrame:SetAttribute("spell", tauntSpellName)
                             unitFrame:SetAttribute("unit", data["target"])
                         else
+                            -- Healer/DPS: Assist (target the target)
                             unitFrame:SetAttribute("type", "assist")
                             unitFrame:SetAttribute("unit", data["target"])
                         end
                     end
-    
+
                     unitFrame.unit = unit
                     unitFrame:SetRole(UnitGroupRolesAssigned(unit))
-    
-                    if DEBUG then
-                        unitFrame.text:SetText(strjoin("_", tostring(unitFrameIndex), UnitName(unit) or unitName))
-                    else
-                        unitFrame.text:SetText(UnitName(unit))
-                    end
-    
+
+                    -- Truncate unit name
+                    unitFrame.text:SetText(TruncateName(unitName, 8))  -- Truncate to 8 characters, for example
+
                     unitFrame:Show()
                 else
                     sbd:log_debug("UpdateGroupFrameUnits nil unitFrame for unit:", unit)
                 end
-    
+
                 unitFrameIndex = unitFrameIndex + 1
             end
         end
     end
 end
 
-function addon:GetGroupUnit(unit)
-    sbd:log_debug("GetGroupUnit: ", unit)
 
-    if groupGuidList then
-        if groupGuidList[unit] or groupGuidList[UnitGUID(unit)] then
-            return unit
-        else
-            for u, d in pairs(groupGuidList) do
-                if d["name"] == unit or d["name"] == UnitName(unit) then
-                    return u
-                end
+function addon:GetGroupUnit(unit)
+sbd:log_debug("GetGroupUnit: ", unit)
+
+if groupGuidList then
+    if groupGuidList[unit] or groupGuidList[UnitGUID(unit)] then
+        return unit
+    else
+        for u, d in pairs(groupGuidList) do
+            if d["name"] == unit or d["name"] == UnitName(unit) then
+                return u
             end
         end
     end
+end
 
-    return nil
+return nil
 end
 
 function addon:InGroup(unit)
@@ -471,8 +486,14 @@ function addon:InGroup(unit)
     end
 end
 
+local lastAggroMessages = {}
+
 function addon:UpdateUnitFramesThreat()
-    sbd:log_debug("UpdateUnitFramesThreat")
+    -- Ensure GroupFrame exists
+    if not self.GroupFrame then
+        if sbd:get_debug() then sbd:log_debug("GroupFrame is nil, cannot update threat.") end
+        return
+    end
 
     -- Update threat for the player
     if UnitExists("target") then
@@ -480,19 +501,16 @@ function addon:UpdateUnitFramesThreat()
         local playerFrame = self.GroupFrame:GetUnitFrame("UnitFrame1")
         
         if playerFrame and playerThreatPct then
-            -- Update threat percentage and background color based on aggro
-            playerFrame:SetThreatPercent(playerThreatPct / threatPercentDivisor)
+            playerFrame:SetThreatPercent(playerThreatPct / 100)
 
             if playerIsTanking then
                 playerFrame.texture:SetColorTexture(1, 0, 0, 1) -- Red for aggro
-                sbd:log_info("Player has aggro")
+                if sbd:get_debug() then sbd:log_debug("Player has aggro.") end
             else
-                playerFrame.texture:SetColorTexture(0, 0, 0, 1) -- Black if no aggro
-                sbd:log_info("Player does NOT have aggro")
+                playerFrame.texture:SetColorTexture(0, 0, 0, 1) -- Black for no aggro
+                if sbd:get_debug() then sbd:log_debug("Player does NOT have aggro.") end
             end
         end
-    else
-        sbd:log_debug("Player has no valid target.")
     end
 
     -- Update threat for other group members
@@ -500,19 +518,22 @@ function addon:UpdateUnitFramesThreat()
         local unitIndex = 2
         for unit, data in pairs(groupGuidList) do
             if unit ~= "player" and UnitExists(unit) then
-                local isTanking, threatStatus, threatPct = UnitDetailedThreatSituation(unit, data.target or "target")
+                local unitTarget = data["target"]
+                local isTanking, threatStatus, threatPct = UnitDetailedThreatSituation(unit, unitTarget)
                 local unitFrame = self.GroupFrame:GetUnitFrame(format("UnitFrame%d", unitIndex))
 
                 if unitFrame and threatPct then
-                    -- Update threat percentage and background color based on aggro
-                    unitFrame:SetThreatPercent(threatPct / threatPercentDivisor)
+                    unitFrame:SetThreatPercent(threatPct / 100)
 
                     if isTanking then
                         unitFrame.texture:SetColorTexture(1, 0, 0, 1) -- Red for aggro
-                        sbd:log_info(UnitName(unit) .. " has aggro")
+                        if sbd:get_debug() then sbd:log_debug(UnitName(unit) .. " has aggro.") end
+                    elseif threatStatus and threatStatus >= 1 then
+                        unitFrame.texture:SetColorTexture(1, 1, 0, 1) -- Yellow for high threat
+                        if sbd:get_debug() then sbd:log_debug(UnitName(unit) .. " has high threat.") end
                     else
-                        unitFrame.texture:SetColorTexture(0, 0, 0, 1) -- Black if no aggro
-                        sbd:log_info(UnitName(unit) .. " does NOT have aggro")
+                        unitFrame.texture:SetColorTexture(0, 0, 0, 1) -- Black for no threat
+                        if sbd:get_debug() then sbd:log_debug(UnitName(unit) .. " does NOT have aggro.") end
                     end
                 end
                 unitIndex = unitIndex + 1
@@ -520,8 +541,6 @@ function addon:UpdateUnitFramesThreat()
         end
     end
 end
-
-
 
 -- event functions:
 function addon:ADDON_LOADED(addOnName)
