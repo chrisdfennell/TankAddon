@@ -14,7 +14,7 @@ end
 
 function sbd:log_debug(...)
     if debug then
-        print("|cff888888", ...)
+        print("|c5F44C834", ...)
     end
 end
 
